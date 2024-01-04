@@ -61,92 +61,56 @@ class Processor {
     return objSlot;
   }
 
-  __getDaySlots(date) {
+  __getDaySlots(date, duration) {
     if (!date) return [];
     if (date in this.#daySlots) return this.#daySlots[date];
     const data = this.#calendarDataSource.getData();
     this.#daySlots[date] = data.slots[date] || [];
-    return this.#daySlots[date];
+    const dateISO = moment(date, 'DD-MM-YYYY').format('YYYY-MM-DD');
+
+    return this.#daySlots[date].filter((daySlot) => {
+      const start = moment(dateISO + ' ' + daySlot.start).valueOf();
+      const end = moment(dateISO + ' ' + daySlot.end).valueOf();
+      return ( (end-start) >= (duration *60*1000) );
+    });
   }
 
   __getRealSlots(daySlots, dateISO, date) {
     const data = this.#calendarDataSource.getData();
 
     if (!(data.sessions || data.sessions[date])) return [];
-    const realSpots = daySlots.reduce((acc, daySlot) => {
-      let noConflicts = true;
-      const slots = data.sessions[date].map((sessionSlot) => {
+
+    const sessions = data.sessions[date];
+
+    return daySlots.filter((daySlot)=>{
+      const start = moment(dateISO + ' ' + daySlot.start);
+      const end = moment(dateISO + ' ' + daySlot.end);
+      return !sessions.find((sessionSlot)=>{
         const sessionStart = moment(
           dateISO + ' ' + sessionSlot.start,
         ).valueOf();
-        const sessionEnd = moment(dateISO + ' ' + sessionSlot.end).valueOf();
-        const start = moment(dateISO + ' ' + daySlot.start).valueOf();
-        const end = moment(dateISO + ' ' + daySlot.end).valueOf();
-        if (sessionStart > start && sessionEnd < end) {
-          noConflicts = false;
-          return [
-            {
-              start: daySlot.start,
-              end: sessionSlot.start,
-            },
-            {
-              start: sessionSlot.end,
-              end: daySlot.end,
-            },
-          ];
-        } else if (sessionStart === start && sessionEnd < end) {
-          noConflicts = false;
-          return {
-            start: sessionSlot.end,
-            end: daySlot.end,
-          };
-        } else if (sessionStart > start && sessionEnd === end) {
-          noConflicts = false;
-          return {
-            start: daySlot.start,
-            end: sessionSlot.start,
-          };
-        } else if (sessionStart === start && sessionEnd === end) {
-          noConflicts = false;
-          return [];
-        }
-        return [];
+        const sessionEnd = moment(dateISO + ' ' + sessionSlot.end);
+        return (start.isSameOrBefore(sessionStart) && end.isSameOrAfter(sessionEnd))
+        || (start.isSameOrAfter(sessionStart) && start.isSameOrBefore(sessionEnd))
+        || (end.isSameOrAfter(sessionStart) && end.isSameOrBefore(sessionEnd))
       });
-      if (noConflicts) {
-        acc = [...acc, daySlot];
-      }
-      acc = [...acc, ...slots.flatMap((v) => v)];
-      return acc;
-    }, []);
-
-    return realSpots;
+    });
   }
 
-  __prepareResultSlots(realSpots=[], dateISO, duration) {
-    let arrSlot = [];
-    realSpots.forEach(function (slot) {
-      let start = slot.start;
-      let resultSlot;
-      do {
-        resultSlot = this.__getOneMiniSlot({
-          startSlot: start,
-          endSlot: slot.end,
-          duration,
-          dateISO,
-        });
-        if (resultSlot) {
-          arrSlot.push(resultSlot);
-          start = moment.utc(resultSlot.endHour).format('HH:mm');
-        }
-      } while (resultSlot);
-
-      return arrSlot;
-    }, this);
-    return arrSlot;
+  __prepareResultSlots(realSpots = [], dateISO, duration) {
+    
+    return realSpots.map((slot)=>{
+      return this.__getOneMiniSlot({
+        startSlot: slot.start,
+        endSlot: slot.end,
+        duration,
+        dateISO,
+      });
+    }).filter(spot=> spot);
   }
   __getSlots(date, duration) {
     const dateISO = moment(date, 'DD-MM-YYYY').format('YYYY-MM-DD');
-    const daySlots = this.__getDaySlots(date);
+    const daySlots = this.__getDaySlots(date, duration);
     const realSpots = this.__getRealSlots(daySlots, dateISO, date);
     return this.__prepareResultSlots(realSpots, dateISO, duration);
   }
